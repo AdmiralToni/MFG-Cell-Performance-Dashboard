@@ -306,7 +306,7 @@ mach = pd.DataFrame(mach, columns = ['SN', 'Process Date', 'Operation', 'Machine
 
 #%% Generate Process Machine Data
 
-writepath = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Machine_Run_Data'
+#writepath = r'Cooling_Hole_Simulation\Machine_Run_Data'
 
 ma = ['A','B','C','D','E','F','G','H','I']
 
@@ -324,7 +324,7 @@ for i in range(0,len(ma)):
 
 #%% Generate Dimensional Data
 
-datapath = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Dimensional_Data'
+#datapath = r'\Cooling_Hole_Simulation\Dimensional_Data'
 shutil.rmtree(datapath) #purge all folders in datapath
 
 pt1 = {1: np.arange(1,16),
@@ -613,7 +613,7 @@ summary = []
 dev = 0.002
 
 
-root = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Dimensional_Data'
+#root = r'Cooling_Hole_Simulation\Dimensional_Data'
 l = len(Perf)
 
 for i in range(0,l):
@@ -698,7 +698,7 @@ for i in range(0,l):
 summary = pd.DataFrame(summary, columns = ['SN', 'Row', 'Avg Dia.', 'Comp to Nom.', 'Performance', 'Test Stand', 'Test Date'])
       
 
-datapath = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Performance_Data'      
+#datapath = r'\Cooling_Hole_Simulation\Performance_Data'      
 
 if not os.path.exists(datapath):
     os.makedirs(datapath)
