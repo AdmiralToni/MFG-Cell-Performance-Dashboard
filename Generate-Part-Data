@@ -1,0 +1,709 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Dec  2 20:33:13 2024
+
+@author: arpet
+"""
+
+import pandas as pd
+import numpy as np
+import random
+import os
+import statistics as st
+import math
+from datetime import datetime
+import time
+import shutil
+
+
+#%% UDFs
+
+def normalize(measured,lb,ub):
+    
+    norm = (measured - lb)/(ub - lb)
+    
+    return(norm)
+
+def tri(x,y):
+    
+    t = round(math.sqrt((x*x) + (y*y)),3)
+    
+    return(t)
+
+def filt(df, l):
+    
+    m = 'Mach{}'.format(l)
+    
+    DF = df[df['Machine'] == m]
+    
+    
+    return(DF)
+
+#%%% UDF: hms_to_seconds(timestamp)
+def hms_to_seconds(timestamp):
+
+    """Converts a timestamp in HH:MM:SS format to seconds."""
+    
+    h, m, s = map(int, timestamp.split(':'))
+    
+    return h * 3600 + m * 60 + s
+
+
+#%%% UDF: get_ts - returns timestamp from date
+def get_ts(date_and_time, full_year = True, form = None):
+    """
+
+    Parameters
+    ----------
+    date_and_time : str
+        Date and time to be converted.
+    full_year : TYPE, optional
+        User designates if the full four digits of the year are represented in date_and_time. The default is True.
+    form : str, optional
+        User designates date_and_time format. The default is None. If the value is None, the function will attempt to discover the format.
+
+    Returns
+    -------
+    Timesstamp of the input date and time.
+
+    """
+    if form == None:
+        form = '%m/%d/%Y %H:%M:%S' #Default format
+    
+    #Initial format check
+    char = date_and_time[len(date_and_time)-1:]
+    if ' ' == char:  
+        date_and_time = date_and_time[:-1] # if the last character in the string is a ' ', remove the space.
+    if 'M' in date_and_time:
+        date_and_time = date_and_time[:-3] # takes off the "_AM" or "_PM" if 'M is in the string
+        
+        
+#----------------------------------------------     
+    #Check that there are at least two digits before each separator  
+    num = ['0','1','2','3','4','5','6','7','8','9']
+    counter = 0
+    pdnt = 'init'
+    new = []
+
+    for i in range(0,len(date_and_time)): 
+        
+        dnt = date_and_time[i]
+        
+        #Previous Character
+        if i == 0:
+            pdnt = 'init'
+        else:
+            pdnt = date_and_time[i-1]
+        
+        #Next Character
+        if i+1 == len(date_and_time):
+            new.extend(dnt)
+            break
+        else:
+            if i+1 < len(date_and_time):
+                ndnt = date_and_time[i+1] 
+        #Initial Condition
+        if i == 0:
+            if dnt in num and ndnt in num: #If the first char is 0-9
+                new.extend(dnt) #add first char to new string
+                
+                if i == len(date_and_time):
+                    break
+            else:
+                if dnt in num and ndnt not in num: #Then there is only one number before the separator
+                    new.extend('0') #add '0' to new string
+                    new.extend(dnt) #add first char to new string
+                   
+        
+        #Non-Initial Condition
+        if i != 0:
+            if dnt == ' ':
+                new.extend(dnt) #Record and continue
+                
+            else:
+                if dnt in num: #if the current character is between 0-9
+                    if pdnt not in num and ndnt not in num: # and the prev and next characters are both not digits 
+                         new.extend('0') #add '0' to new string
+                         new.extend(dnt) #then add char to new string  
+                         
+                    else:
+                        new.extend(dnt) #Record and continue
+                        
+                else:
+                    if dnt not in num:  #if the current character is NOT between 0-9 
+                        #if new[i] in num and new[i-1] in num:  #If the last 2 chars of the new string are digits
+                        new.extend(dnt) #Record
+                        
+                        
+    date_and_time = ''.join(new)
+    
+#----------------------------------------------   
+    
+    if '/' in date_and_time[:8] or '-' in date_and_time[:8]: #if the user input is definitely atleast a date.
+        
+        if len(date_and_time) <= 10 and '/' in date_and_time: # if the user only included the date separated by '/' or '-'.
+            date_and_time = date_and_time + ' 00:00:00' #If date_and_time only displays the date, 00:00:00 is added to the string.
+            form = '%m/%d/%Y %H:%M:%S'   # 2 Digit year if the string length was less than 10.
+        else:
+            if len(date_and_time) >= 17 and '/' in date_and_time:  # if the year is 4 digits
+                if '/' in date_and_time[:4]:     
+                    form = '%m/%d/%Y %H:%M:%S'   # 4 Digit year if the string length was > 17.
+                else: 
+                    form = '%Y/%m/%d %H:%M:%S'
+            
+        if len(date_and_time) <= 10 and '-' in date_and_time: # if the user only included the date separated by '/' or '-'.
+            date_and_time = date_and_time + ' 00:00:00' #If date_and_time only displays the date, 00:00:00 is added to the string.
+            form = '%m-%d-%Y %H:%M:%S'   # 4 Digit year if the string length was == 10.
+        else:    
+            if len(date_and_time) >= 17 and '-' in date_and_time:  # if the year is 4 digits
+                if '-' in date_and_time[:4]:    
+                    form = '%m-%d-%Y %H:%M:%S'   # 4 Digit year if the string length was > 17.
+                else: 
+                    form = '%Y-%m-%d %H:%M:%S'
+    
+    
+    if ':' in date_and_time[:8]: # if the time is first
+    
+        if len(date_and_time) <= 17: # if the year is 2 digits
+            form = '%H:%M:%S %m/%d/%y'   # 2 Digit year if the string length was less than 17.
+            
+        if len(date_and_time) > 17:  # if the year is 4 digits
+            form = '%H:%M:%S %m/%d/%Y'   # 4 Digit year if the string length was > 17.
+                
+                
+    if len(date_and_time) < 12 and ':' in date_and_time: #if there are no '/' or '-' in the string, 
+        return(hms_to_seconds(date_and_time))
+        
+    
+    #if condition: full_year = True indicates that the user is passing a date_and_time with a 4 digit year.
+    if full_year == True:
+        
+        try:
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+                
+        except ValueError:
+            
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+    
+    #else condition: only 2 digits in year spot.
+    else:    
+        try:
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+        
+        except ValueError:
+
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+    
+    return(mtstamp)
+
+
+
+#%% Part Type, Dates, and Machines
+
+Op1date = ['10/14/2024', '10/15/2024', '10/16/2024', '10/17/2024', '10/18/2024',
+           '10/21/2024', '10/22/2024', '10/23/2024', '10/24/2024', '10/25/2024',
+           '10/28/2024', '10/29/2024', '10/30/2024', '10/31/2024', '11/01/2024']
+
+OP1 = ['MachA', 'MachB', 'MachC', 'MachH']
+OP2 = ['MachD', 'MachE', 'MachF', 'MachA']
+OP3 = ['MachG', 'MachH', 'MachI', 'MachD']
+insp= ['Insp. Mach 1', 'Insp. Mach 2', 'Insp. Mach 3', 'Insp. Mach 4']
+stand = ['Test Stand 1', 'Test Stand 2']
+
+
+N = ['1','1','1','2']
+pntotal = np.arange(1,149)
+
+PN = []
+mach = []
+Insp = []
+Perf = []
+for i in range(0,len(pntotal)):
+    s = str(pntotal[i])
+    l = len(s)
+    n = random.choice(N)
+    
+    if n == '1':
+        if l == 1:
+            p = 'PN1000' + s
+        if l == 2:
+            p = 'PN100' + s
+        if l == 3:
+            p = 'PN10' + s
+    
+    if n == '2':
+        if l == 1:
+            p = 'PN2000' + s
+        if l == 2:
+            p = 'PN200' + s
+        if l == 3:
+            p = 'PN20' + s
+
+
+    op1 = random.choice(OP1) 
+    op2 = random.choice(OP2)
+    op3 = random.choice(OP3)
+    inspmach = random.choice(insp)
+    standm = random.choice(stand)
+    
+    h = int(random.uniform(0,23))
+    if len(str(h)) == 1:
+        h = '0{}'.format(h)
+    
+    m = int(random.uniform(0,59))
+    if len(str(m)) == 1:
+        m = '0{}'.format(m)
+    
+    s = int(random.uniform(0,59))
+    if len(str(s)) == 1:
+        s = '0{}'.format(s)
+    
+    op1date = random.choice(Op1date)
+    op1date = op1date + ' {}:{}:{}'.format(h,m,s)
+    
+    # Get Timestamp
+    op1date = get_ts(op1date)
+    op2date = op1date + random.uniform(3600,4000)
+    op3date = op2date + random.uniform(3600,4000)
+    inspdate = op3date + random.uniform(3600,4000)
+    perfdate = inspdate + random.uniform(7200,8000)
+    
+    
+    # Back to date time format
+    op1date = datetime.fromtimestamp(op1date)
+    op2date = datetime.fromtimestamp(op2date)
+    op3date = datetime.fromtimestamp(op3date)
+    inspdate = datetime.fromtimestamp(inspdate)
+    perfdate = datetime.fromtimestamp(perfdate)
+    
+    
+    # Cycle Time
+    t1m = int(random.uniform(15,20))
+    t1s = int(random.uniform(10,59))
+    t1 = '00:' + str(t1m) + ':' + str(t1s)
+    
+    t2m = int(random.uniform(25,30))
+    t2s = int(random.uniform(10,59))
+    t2 = '00:' + str(t2m) + ':' + str(t2s)
+    
+    t3m = int(random.uniform(50,55))
+    t3s = int(random.uniform(10,59))
+    t3 = '00:' + str(t3m) + ':' + str(t3s)
+    
+    
+
+    mach.append((p,str(op1date), 'OP1', op1, t1))
+    mach.append((p,str(op2date)[:-7], 'OP2', op2, t2))
+    mach.append((p,str(op3date)[:-7], 'OP3', op3, t3))
+    Insp.append((p,inspmach,str(inspdate)[:-7]))
+    Perf.append((p,standm,str(perfdate)[:-7]))
+    
+mach = pd.DataFrame(mach, columns = ['SN', 'Process Date', 'Operation', 'Machine', 'Cycle Time'])
+
+#%% Generate Process Machine Data
+
+writepath = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Machine_Run_Data'
+
+ma = ['A','B','C','D','E','F','G','H','I']
+
+
+
+for i in range(0,len(ma)):
+    m = ma[i]
+    df = filt(mach,m)
+    p = writepath + '\\Machine{}'.format(m)
+    
+    if not os.path.exists(p):
+        os.makedirs(p)
+    
+    df.to_csv(p + '\\Machine{}.csv'.format(m))
+
+#%% Generate Dimensional Data
+
+datapath = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Dimensional_Data'
+shutil.rmtree(datapath) #purge all folders in datapath
+
+pt1 = {1: np.arange(1,16),
+      2: np.arange(1,14), 
+      3: np.arange(1,19),
+      4: np.arange(1,11)}
+
+pt2 = {1: np.arange(1,26),
+      2: np.arange(1,19), 
+      3: np.arange(1,15),
+      4: np.arange(1,16)}
+
+dims = [
+        'Serial Number', 'Inspection Machine', 'Inspection Date', 'Row', 'Hole', 
+        'Feature X Position Measured', 'Feature Y Position Measured', 
+        'Feature Position Measured', 'Feature Position Out of Tolerance',
+        'Angle 1 Measured',	'Angle 1 Out of Tolerance','Angle 1 Lower Bound', 'Angle 1 Upper Bound',
+        'Angle 2 Measured',	'Angle 2 Out of Tolerance','Angle 2 Lower Bound', 'Angle 2 Upper Bound',
+        'Angle 3 Measured',	'Angle 3 Out of Tolerance','Angle 3 Lower Bound', 'Angle 3 Upper Bound',
+        'Area 1 Measured', 'Area 2 Measured',	 
+        'Area Ratio Measured',	'Area Ratio Out of Tolerance', 'Area Ratio Lower Bound', 'Area Ratio Upper Bound',
+        'Diameter Measured',	'Diameter Out of Tolerance', 'Diameter Lower Bound', 'Diameter Upper Bound',
+        ]
+
+
+l = len(Insp)
+
+for i in range(0,l):
+
+    sn = Insp[i][0]
+    stand = Insp[i][1]
+    dt = Insp[i][2]
+    
+    
+    collect = []
+    part = []
+    
+    f1tot = 0; a1tot = 0; a2tot = 0; a3tot = 0; areatot = 0; dtot = 0;
+
+    if 'PN1' in sn:
+        for r,h in pt1.items():
+            for i in range(0,len(h)):
+                
+                f1oot = 0; a1oot = 0; a2oot = 0; a3oot = 0; areaoot = 0; doot = 0
+
+                f1ub = 0.1; a1lb = 2.0; a1ub = 5.0; a2lb = 3.0; a2ub = 6.0; a3lb = 1.0; a3ub = 4.0; arlb = 0.82; arub = 1.22; dlb = 0.015; dub = 0.025; 
+
+                if r == 1:
+                    dlb = dlb - 0.003
+                    dub = dub - 0.003
+                    if h[i] >=3 and h[i] <7:
+                        a2lb = 1.0
+                        a2ub = 7.0 
+                        arlb = arlb + 0.02
+                        arub = arub + 0.04
+                
+                if r == 2:
+                    dlb = dlb - 0.009
+                    dub = dub - 0.009
+                    if h[i] >=6 and h[i] <8:        
+                        a2lb = 2.0
+                        a2ub = 8.0 
+                        arlb = arlb - 0.08
+                        arub = arub + 0.05
+                        
+                if r == 3:
+                    dlb = dlb + 0.002
+                    dub = dub + 0.002
+                    if h[i] >=1 and h[i] <5:        
+                        a2lb = 4.5
+                        a2ub = 7.5 
+                        arlb = arlb - 0.04
+                        arub = arub + 0.03
+                
+                if r == 4:
+                    if h[i] >=4 and h[i] < 10:        
+                        a2lb = 3.0
+                        a2ub = 9.0 
+                        arlb = arlb + 0.01
+                        arub = arub + 0.05
+                
+                f1x = round(random.uniform(0,0.08),3)
+                f1y = round(random.uniform(0,0.08),3)           
+                f1 = tri(f1x,f1y)
+                a1 = round(random.uniform(a1lb-0.1,a1ub+0.1),2)
+                a2 = round(random.uniform(a2lb-0.1,a2ub+0.1),2)
+                a3 = round(random.uniform(a3lb-0.1,a3ub+0.1),2)
+                area1 = round(random.uniform(0.00022,0.0003),6)
+                area2 = round(random.uniform(0.00022,0.0003),6)
+                area = round((area1/area2),3)
+                d = round(random.uniform(dlb-0.0005,dub+0.0005),4)
+                
+                if f1 > f1ub:
+                    f1oot = f1 - f1ub
+                    f1tot = f1tot + 1
+                if a1 > a1ub:
+                    a1oot = a1 - a1ub
+                    a1tot = a1tot + 1
+                if a1 < a1lb:
+                    a1oot = a1 - a1lb
+                    a1tot = a1tot + 1
+                if a2 > a2ub:
+                    a2oot = a2 - a2ub
+                    a2tot = a2tot + 1
+                if a2 < a2lb:
+                    a2oot = a2 - a2lb
+                    a2tot = a2tot + 1
+                if a3 > a3ub:
+                    a3oot = a3 - a3ub
+                    a3tot = a3tot + 1
+                if a3 < a3lb:
+                    a3oot = a3 - a3lb
+                    a3tot = a3tot + 1
+                if area > arub:
+                    areaoot = area - arub
+                    areatot = areatot + 1
+                if area < arlb:
+                    areaoot = area - arlb
+                    areatot = areatot + 1
+                if d > dub:
+                    doot = d - dub
+                    dtot = dtot + 1
+                if d < dlb:
+                    doot = d - dlb
+                    dtot = dtot + 1
+                    
+                collect = (sn,stand,dt,r,h[i],f1x,f1y,f1,f1oot,a1,a1oot,a1lb,a1ub,a2,a2oot,a2lb,a2ub,a3,a3oot,a3lb,a3ub,area1,area2,area,areaoot,arlb,arub,d,doot,dlb,dub)
+                part.append(collect)    
+    else:
+         for r,h in pt2.items():
+             for i in range(0,len(h)):
+                 
+                 f1oot = 0 
+                 a1oot = 0
+                 a2oot = 0 
+                 a3oot = 0 
+                 areaoot = 0
+                 doot = 0 
+                 
+                 f1ub = 0.09
+                 a1lb = 2.2 
+                 a1ub = 5.2
+                 a2lb = 2.9
+                 a2ub = 5.9
+                 a3lb = 1.5 
+                 a3ub = 4.5
+                 arlb = 0.92
+                 arub = 1.32
+                 dlb = 0.025
+                 dub = 0.035
+                 
+                 if r == 1:
+                     dlb = dlb - 0.003
+                     dub = dub - 0.003
+                     if h[i] >=7 and h[i] < 18:
+                         a2lb = 1.5
+                         a2ub = 7.5 
+                         arlb = arlb + 0.02
+                         arub = arub + 0.04
+                 
+                 if r == 2:
+                     dlb = dlb - 0.009
+                     dub = dub - 0.009
+                     if h[i] >=3 and h[i] <12:        
+                         a2lb = 2.2
+                         a2ub = 8.2 
+                         arlb = arlb - 0.08
+                         arub = arub + 0.05
+                         
+                 if r == 3:
+                     dlb = dlb + 0.002
+                     dub = dub + 0.002
+                     if h[i] >=1 and h[i] <10:        
+                         a2lb = 4.5
+                         a2ub = 7.5 
+                         arlb = arlb - 0.04
+                         arub = arub + 0.03
+                 
+                 if r == 4:
+                     if h[i] >=4 and h[i] < 8:        
+                         a2lb = 3.3
+                         a2ub = 9.3 
+                         arlb = arlb + 0.01
+                         arub = arub + 0.05
+                 
+                 f1x = round(random.uniform(0,0.08),3)
+                 f1y = round(random.uniform(0,0.08),3)           
+                 f1 = tri(f1x,f1y)
+                 a1 = round(random.uniform(a1lb-0.3,a1ub+0.3),2)
+                 a2 = round(random.uniform(a2lb-0.3,a2ub+0.3),2)
+                 a3 = round(random.uniform(a3lb-0.3,a3ub+0.3),2)
+                 area1 = round(random.uniform(0.00025,0.00033),6)
+                 area2 = round(random.uniform(0.00025,0.00033),6)
+                 area = round((area1/area2),3)
+                 d = round(random.uniform(dlb-0.001,dub+0.001),4)
+                 
+                 if f1 > f1ub:
+                     f1oot = f1 - f1ub
+                     f1tot = f1tot + 1
+                 if a1 > a1ub:
+                     a1oot = a1 - a1ub
+                     a1tot = a1tot + 1
+                 if a1 < a1lb:
+                     a1oot = a1 - a1lb
+                     a1tot = a1tot + 1
+                 if a2 > a2ub:
+                     a2oot = a2 - a2ub
+                     a2tot = a2tot + 1
+                 if a2 < a2lb:
+                     a2oot = a2 - a2lb
+                     a2tot = a2tot + 1
+                 if a3 > a3ub:
+                     a3oot = a3 - a3ub
+                     a3tot = a3tot + 1
+                 if a3 < a3lb:
+                     a3oot = a3 - a3lb
+                     a3tot = a3tot + 1
+                 if area > arub:
+                     areaoot = area - arub
+                     areatot = areatot + 1
+                 if area < arlb:
+                     areaoot = area - arlb
+                     areatot = areatot + 1
+                 if d > dub:
+                     doot = d - dub
+                     dtot = dtot + 1
+                 if d < dlb:
+                     doot = d - dlb
+                     dtot = dtot + 1           
+            
+                 collect = (sn,stand,dt,r,h[i],f1x,f1y,f1,f1oot,a1,a1oot,a1lb,a1ub,a2,a2oot,a2lb,a2ub,a3,a3oot,a3lb,a3ub,area1,area2,area,areaoot,arlb,arub,d,doot,dlb,dub)
+                 part.append(collect)
+            
+    
+        
+    part = pd.DataFrame(part, columns = dims)
+    
+    folder = "\\" + sn
+    if not os.path.exists(datapath + folder):
+        os.makedirs(datapath + folder)
+    
+    part.to_csv(datapath + folder + '\\{}_raw_inspection_data.csv'.format(sn))
+        
+
+#%%% Generate Performance Data
+
+def af(r,an,pn): #return predictable performance results based on avg dia.
+    
+    if pn == 1:   
+        limits = {
+            'C1 - Row 1 [ft^3/min]':[0.004,0.005],
+            'C2 - Row 2 [ft^3/min]':[0.0008,0.001],
+            'C3 - Row 3 [ft^3/min]':[0.02,0.05],
+            'C4 - Row 4 [ft^3/min]':[0.005,0.01],
+            }
+    if pn == 2:   
+        limits = {
+            'C1 - Row 1 [ft^3/min]':[0.03,0.05],
+            'C2 - Row 2 [ft^3/min]':[0.01,0.03],
+            'C3 - Row 3 [ft^3/min]':[0.008,0.01],
+            'C4 - Row 4 [ft^3/min]':[0.005,0.01],
+            }
+        
+    lb = limits['C{} - Row {} [ft^3/min]'.format(r,r)][0]
+    ub = limits['C{} - Row {} [ft^3/min]'.format(r,r)][1]
+    
+    dif = ub-lb
+    
+    LB = lb - dif/2
+    UB = ub + dif/2
+    
+    af = random.uniform(lb,ub)
+    if an =='High':
+        af = random.uniform(ub,UB)
+    if an == 'Low':
+        af = random.uniform(LB,lb)
+    
+        
+    return(af)
+
+r1nomDia = 0.016; r2nomDia = 0.011; r3nomDia = 0.022; r4nomDia = 0.020; 
+
+r1nomDia2 = 0.026; r2nomDia2 = 0.019; r3nomDia2 = 0.03; r4nomDia2 = 0.03; 
+
+summary = []
+dev = 0.002
+
+
+root = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Dimensional_Data'
+l = len(Perf)
+
+for i in range(0,l):
+
+    sn = Perf[i][0]
+    stand = Perf[i][1]
+    dt = Perf[i][2]
+
+    filepath = r'{}\\'.format(root) + sn + '\\{}_raw_inspection_data.csv'.format(sn)
+    part = pd.read_csv(filepath)
+    
+    d1 = []
+    d2 = []
+    d3 = []
+    d4 = []
+    
+    for index,row in part.iterrows():
+        sn = row['Serial Number']
+        pn = 1
+        r1nomDia = 0.016
+        r2nomDia = 0.011
+        r3nomDia = 0.022
+        r4nomDia = 0.020
+        if 'PN2' in sn:
+            pn = 2
+            r1nomDia = r1nomDia2
+            r2nomDia = r2nomDia2
+            r3nomDia = r3nomDia2
+            r4nomDia = r4nomDia2
+            dev = 0.003
+        
+        r = row['Row']
+        d = row['Diameter Measured']
+        if r == 1:
+            d1.append(d)
+        if r == 2:
+            d2.append(d)
+        if r == 3:
+            d3.append(d)
+        if r == 4:
+            d4.append(d)
+    
+    avg1 = st.mean(d1)
+    avg2 = st.mean(d2)
+    avg3 = st.mean(d3)
+    avg4 = st.mean(d4)
+    
+    an1 = 'Nom'
+    an2 = 'Nom'
+    an3 = 'Nom'
+    an4 = 'Nom'
+    
+    if avg1 > r1nomDia + dev:
+        an1 = 'High'
+    if avg1 < r1nomDia - dev:
+        an1 = 'Low'
+    a = af(1, an1, pn)
+    summary.append((sn, 1, avg1, an1, round(a,7), stand, dt))
+        
+    if avg2 > r2nomDia + dev:
+        an2 = 'High'
+    if avg2 < r2nomDia - dev:
+        an2 = 'Low'
+    a = af(2, an2, pn)
+    summary.append((sn, 2, avg2, an2, round(a,7), stand, dt))
+        
+    if avg3 > r3nomDia + dev:
+        an3 = 'High'
+    if avg3 < r3nomDia - dev:
+        an3 = 'Low'
+    a = af(3, an3, pn)
+    summary.append((sn, 3, avg3, an3, round(a,7), stand, dt))
+    
+    if avg4 > r4nomDia + dev:
+        an4 = 'High'
+    if avg4 < r4nomDia - dev:
+        an4 = 'Low'
+    a = af(4, an4, pn)
+    summary.append((sn, 4, avg4, an4, round(a,7), stand, dt))
+            
+     
+summary = pd.DataFrame(summary, columns = ['SN', 'Row', 'Avg Dia.', 'Comp to Nom.', 'Performance', 'Test Stand', 'Test Date'])
+      
+
+datapath = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Performance_Data'      
+
+if not os.path.exists(datapath):
+    os.makedirs(datapath)
+
+summary.to_csv(datapath +'\\Performance_data.csv') 
+            
+
+
