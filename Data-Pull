@@ -1,0 +1,1391 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Dec 15 13:11:45 2024
+
+@author: 
+"""
+
+
+import datetime as dt 
+import pandas as pd
+from datetime import datetime
+import time
+import os
+import matplotlib.pyplot as plt
+import matplotlib.patches as mp
+import win32com.client 
+import tkinter as tk
+import tkinter.font
+from tkinter import ttk
+
+#querypath = r'\Performance_Data\Performance_data.csv'
+#datasave = r'\Cooling_Hole_Simulation\00_Reports\\'
+
+
+
+machs = {
+    'OP3': ['MachineG', 'MachineH', 'MachineI', 'MachineD'],
+    'OP1': ['MachineA', 'MachineB', 'MachineC', 'MachineH'],
+    'OP2': ['MachineD', 'MachineE', 'MachineF', 'MachineA'],
+    
+    }
+
+#%% User-Defined Functions
+
+#%%% UDF: set_lim
+def set_lim(c,pn):
+    """
+    Parameters
+    ----------
+    c : str
+        User passes which limit set to call.
+    pn : str
+        Part number 1 or 2.
+
+    Returns
+    -------
+    The performance test limits for the part.
+
+    """
+    if pn == 'PN1':
+        
+        limits = {
+            'C1 - Row 1 [ft^3/min]':[0.004, 0.005, 0.0045, 0.003, 0.0055],
+            'C2 - Row 2 [ft^3/min]':[0.0008, 0.001, 0.0009, 0.00065, 0.00125],
+            'C3 - Row 3 [ft^3/min]':[0.02, 0.05, 0.035, 0.01, 0.06],
+            'C4 - Row 4 [ft^3/min]':[0.005, 0.01, 0.0075, 0.003, 0.012],
+            }
+
+    if pn == 'PN2':
+        
+        limits = {
+            'C1 - Row 1 [ft^3/min]':[0.03, 0.05, 0.04, 0.02 ,0.06],
+            'C2 - Row 2 [ft^3/min]':[0.01, 0.03, 0.02, 0.0009, 0.04],
+            'C3 - Row 3 [ft^3/min]':[0.008, 0.01, 0.009, 0.005, 0.013],
+            'C4 - Row 4 [ft^3/min]':[0.005, 0.01, 0.0075, 0.002, 0.012],
+            }
+    
+    if c == 'C1' or c == 1:
+        ret = limits['C1 - Row 1 [ft^3/min]']
+        
+    if c == 'C2' or c == 2:
+        ret = limits['C2 - Row 2 [ft^3/min]']
+    
+    if c == 'C3' or c == 3:
+        ret = limits['C3 - Row 3 [ft^3/min]']
+    
+    if c == 'C4' or c == 4:
+        ret = limits['C4 - Row 4 [ft^3/min]']
+        
+
+        
+    return(ret)
+
+#%%% UDF: Combine_dictionaries
+def Combine_Dictionaries(dictionaries):
+    """
+    Parameters
+    ----------
+    dictionaries : List of 2 or more dictionaries to combine.
+
+    RETURNS
+    -------
+    Combined dictionary merging all of the input dictionaries. Keeps keys and
+    values that might not be present in all of the individual dictionaries.
+
+    """
+    D = dictionaries
+    out = deff(list)
+    c = []
+    for d in D:
+        for key, value in d.items():
+            for i in range(0,len(value)):
+                c.extend(value[i])
+            out[key].extend(c)
+            c = []
+    return out
+
+#%%% UDF: hms_to_seconds(timestamp)
+def hms_to_seconds(timestamp):
+
+    """Converts a timestamp in HH:MM:SS format to seconds."""
+    
+    h, m, s = map(int, timestamp.split(':'))
+    
+    return h * 3600 + m * 60 + s
+
+#%%% UDF: get_ts - returns timestamp from date
+def get_ts(date_and_time, full_year = True, form = None):
+    """
+    This function is intended to handle many different date time formats, and 
+    utilizes means of format correction to prevent returning a value error or
+    otherwise
+
+    Parameters
+    ----------
+    date_and_time : str
+        Date and time to be converted.
+    full_year : TYPE, optional
+        User designates if the full four digits of the year are represented in 
+        date_and_time. The default is True.
+    form : str, optional
+        User designates date_and_time format. The default is None. If the 
+        value is None, the function will attempt to discover the format.
+
+    Returns
+    -------
+    Timesstamp of the input date and time.
+
+    """
+    if form == None:
+        form = '%m/%d/%Y %H:%M:%S' #Default format
+    
+    #Initial format check
+    char = date_and_time[len(date_and_time)-1:]
+    if ' ' == char:  
+        date_and_time = date_and_time[:-1] # if the last character in the string is a ' ', remove the space.
+    if 'M' in date_and_time:
+        date_and_time = date_and_time[:-3] # takes off the "_AM" or "_PM" if 'M is in the string
+        
+        
+#----------------------------------------------     
+    #Check that there are at least two digits before each separator  
+    num = ['0','1','2','3','4','5','6','7','8','9']
+    counter = 0
+    pdnt = 'init'
+    new = []
+
+    for i in range(0,len(date_and_time)): 
+        
+        dnt = date_and_time[i]
+        
+        #Previous Character
+        if i == 0:
+            pdnt = 'init'
+        else:
+            pdnt = date_and_time[i-1]
+        
+        #Next Character
+        if i+1 == len(date_and_time):
+            new.extend(dnt)
+            break
+        else:
+            if i+1 < len(date_and_time):
+                ndnt = date_and_time[i+1] 
+        #Initial Condition
+        if i == 0:
+            if dnt in num and ndnt in num: #If the first char is 0-9
+                new.extend(dnt) #add first char to new string
+                
+                if i == len(date_and_time):
+                    break
+            else:
+                if dnt in num and ndnt not in num: #Then there is only one number before the separator
+                    new.extend('0') #add '0' to new string
+                    new.extend(dnt) #add first char to new string
+                   
+        
+        #Non-Initial Condition
+        if i != 0:
+            if dnt == ' ':
+                new.extend(dnt) #Record and continue
+                
+            else:
+                if dnt in num: #if the current character is between 0-9
+                    if pdnt not in num and ndnt not in num: # and the prev and next characters are both not digits 
+                         new.extend('0') #add '0' to new string
+                         new.extend(dnt) #then add char to new string  
+                         
+                    else:
+                        new.extend(dnt) #Record and continue
+                        
+                else:
+                    if dnt not in num:  #if the current character is NOT between 0-9 
+                        #if new[i] in num and new[i-1] in num:  #If the last 2 chars of the new string are digits
+                        new.extend(dnt) #Record
+                        
+                        
+    date_and_time = ''.join(new)
+    
+#----------------------------------------------   
+    
+    if '/' in date_and_time[:8] or '-' in date_and_time[:8]: #if the user input is definitely atleast a date.
+        
+        if len(date_and_time) <= 10 and '/' in date_and_time: # if the user only included the date separated by '/' or '-'.
+            date_and_time = date_and_time + ' 00:00:00' #If date_and_time only displays the date, 00:00:00 is added to the string.
+            form = '%m/%d/%Y %H:%M:%S'   # 2 Digit year if the string length was less than 10.
+        else:
+            if len(date_and_time) >= 17 and '/' in date_and_time:  # if the year is 4 digits
+                if '/' in date_and_time[:4]:     
+                    form = '%m/%d/%Y %H:%M:%S'   # 4 Digit year if the string length was > 17.
+                else: 
+                    form = '%Y/%m/%d %H:%M:%S'
+            
+        if len(date_and_time) <= 10 and '-' in date_and_time: # if the user only included the date separated by '/' or '-'.
+            date_and_time = date_and_time + ' 00:00:00' #If date_and_time only displays the date, 00:00:00 is added to the string.
+            form = '%m-%d-%Y %H:%M:%S'   # 4 Digit year if the string length was == 10.
+        else:    
+            if len(date_and_time) >= 17 and '-' in date_and_time:  # if the year is 4 digits
+                if '-' in date_and_time[:4]:    
+                    form = '%m-%d-%Y %H:%M:%S'   # 4 Digit year if the string length was > 17.
+                else: 
+                    form = '%Y-%m-%d %H:%M:%S'
+    
+    
+    if ':' in date_and_time[:8]: # if the time is first
+    
+        if len(date_and_time) <= 17: # if the year is 2 digits
+            form = '%H:%M:%S %m/%d/%y'   # 2 Digit year if the string length was less than 17.
+            
+        if len(date_and_time) > 17:  # if the year is 4 digits
+            form = '%H:%M:%S %m/%d/%Y'   # 4 Digit year if the string length was > 17.
+                
+                
+    if len(date_and_time) < 12 and ':' in date_and_time: #if there are no '/' or '-' in the string, 
+        return(hms_to_seconds(date_and_time))
+        
+    
+    #if condition: full_year = True indicates that the user is passing a date_and_time with a 4 digit year.
+    if full_year == True:
+        
+        try:
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+                
+        except ValueError:
+            
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+    
+    #else condition: only 2 digits in year spot.
+    else:    
+        try:
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+        
+        except ValueError:
+
+            mt = datetime.strptime(date_and_time, form)
+            mtstamp = time.mktime(mt.timetuple())
+    
+    return(mtstamp)
+
+
+#%%% UDF: Pt_List_by_Date - Records all parts that were run on a machine within a date range
+def Pt_List_by_Date(start, end, pn, out = 'df', machs = None):  
+    """
+    Parameters
+    ----------
+    start : str
+        DESCRIPTION.
+    end : str
+        DESCRIPTION.
+    out : 
+        Contains all operations (keys) and all machines (values) that conduct that operation.
+    pn : str
+        Part Type.
+    out : str, optional
+        User specifies what format to return. Either 'dict' for dictionary, or 'df' for DataFrame. Default is 'df'.
+    machs : dict, optional
+        Contains all operations (keys) and all machines (values) that conduct that operation.
+        
+    Returns
+    -------
+    None.
+    """
+    if pn == 'PN1':
+        if isinstance(start, str):
+            start = get_ts(start)
+        if isinstance(end, str):
+            end = get_ts(end)
+        
+        output1 = {}
+        output2 = {}
+        output3 = {}
+        output = {}
+        
+          
+        for l,m in machs.items(): 
+            for i in range(0,len(m)):
+                path = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Machine_Run_Data\{}\{}.csv'.format(m[i], m[i])  
+                df = pd.read_csv(path, usecols = ['SN', 'Process Date', 'Operation', 'Machine'])
+                
+                for index, row in df.iterrows():
+                    sn = row['SN']
+                    dt = row['Process Date']
+                    op = row['Operation']
+                    mach = row['Machine']
+                    
+                    dt = get_ts(dt)
+                    
+                    if dt >= start and dt < end: 
+                    
+                        if op == 'OP1' and pn in sn:     
+                            output1[sn] = []
+                            output1[sn].append([mach,dt])
+                             
+                        if op == 'OP2' and pn in sn:
+                            output2[sn] = []
+                            output2[sn].append([mach,dt])
+                            
+                        if op == 'OP3' and pn in sn:
+                            output3[sn] = []
+                            output3[sn].append([mach,dt])
+                          
+                    
+                
+        o = [output1,output2,output3]
+            
+        output = Combine_Dictionaries(o) 
+        if out == 'dict':
+            return(output)
+            
+        if out == 'df':
+            output = pd.DataFrame.from_dict(output, orient = 'index', columns = ['OP1 Machine', 'OP1 Process Date', 'OP2 Machine', 'OP2 Process Date', 'OP3 Machine', 'OP3 Process Date'])
+            output.rename_axis('Serial Number', inplace=True)
+            output = output.reset_index()
+            return(output)
+    
+    if pn == 'PN2':
+        if isinstance(start, str):
+            start = get_ts(start)
+        if isinstance(end, str):
+            end = get_ts(end)
+        
+        output1 = {}
+        output3 = {}
+        output = {}
+        
+          
+        for l,m in machs.items(): 
+            for i in range(0,len(m)):
+                path = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\Machine_Run_Data\{}\{}.csv'.format(m[i], m[i])  
+                df = pd.read_csv(path, usecols = ['SN', 'Process Date', 'Operation', 'Machine'])
+                
+                for index, row in df.iterrows():
+                    sn = row['SN']
+                    dt = row['Process Date']
+                    op = row['Operation']
+                    mach = row['Machine']
+                    
+                    dt = get_ts(dt)
+                    
+                    if dt >= start and dt < end: 
+                    
+                        if op == 'OP1' and pn in sn:     
+                            output1[sn] = []
+                            output1[sn].append([mach,dt])
+                            
+                        if op == 'OP3' and pn in sn:
+                            output3[sn] = []
+                            output3[sn].append([mach,dt])
+                          
+                    
+                
+        o = [output1,output3]
+            
+        output = Combine_Dictionaries(o) 
+        if out == 'dict':
+            return(output)
+            
+        if out == 'df':
+            output = pd.DataFrame.from_dict(output, orient = 'index', columns = ['OP1 Machine', 'OP1 Process Date', 'OP3 Machine', 'OP3 Process Date'])
+            output.rename_axis('Serial Number', inplace=True)
+            output = output.reset_index()
+            return(output)
+           
+#%%% UDF: performance_data_pull
+             
+def performance_data_pull(SN, path, print_stand = False):
+    """
+    Pulls performance data for one serial number from csv database.  
+    
+    Parameters
+    ----------
+    SN : str
+        Serial number to get data for.
+    path : str
+        File path to csv database.
+    print_stand : True/False, optional
+        Choose whether or not to pass the Test Stand number. The default is False.
+
+    Returns
+    -------
+    All performance data for the specified serial number.
+
+    """
+
+    df = pd.read_csv(path)
+    row1 = 'No Data'
+    row2 = 'No Data'
+    row3 = 'No Data'
+    row4 = 'No Data'
+    r = []
+    for index, row in df.iterrows():
+        sn = row['SN']
+        R = row['Row']
+        P = row['Performance']
+        stand = row['Test Stand']
+        
+        if SN == sn:
+            if int(R) == 1:
+                row1 = P
+            if int(R) == 2:
+                row2 = P
+            if int(R) == 3:
+                row3 = P
+            if int(R) == 4:
+                row4 = P
+    
+    if print_stand == False:
+        r = (row1, row2, row3, row4)
+    else:
+        r = (stand, row1, row2, row3, row4)
+
+    return(r)
+
+#%%% UDF: chart
+def chart(data, pn, plot_path, c, sort, DT = False):
+    if DT == False:
+        DT = ''
+    
+    if sort == 'OP1' or sort == 'OP2' or sort == 'OP3':
+        if pn == 'PN1':
+            if c == 1:
+                cc = 1
+                ltitle = 'OP1 Machines'
+                color = ['#0054b2','#00b0cc', '#00dcff', '#8adeec']
+            if c == 2:
+                cc = 2
+                ltitle = 'OP2 Machines'
+                color = ['#429600','#57c600', '#70ff00', '#91dc56']
+            if c == 3 :
+                cc = 3
+                ltitle = 'OP3 Machines'
+                color = ['#ffc502', '#ffd902', '#f6f337', '#f5f37d']
+            if c == 4:
+                cc = 3
+                ltitle = 'OP3 Machines'
+                color = ['#ffc502', '#ffd902', '#f6f337', '#f5f37d']
+        
+        if pn == 'PN2':
+            datax = data['Serial Number']
+            if c == 1:
+                cc = 1
+                ltitle = 'OP1 Machines'
+                color = ['#0054b2','#00b0cc', '#00dcff', '#8adeec']
+            if c == 2:
+                cc = 2
+                ltitle = 'OP1 Machines'
+                color = ['#0054b2','#00b0cc', '#00dcff', '#8adeec']
+            if c == 3 :
+                cc = 3
+                ltitle = 'OP3 Machines'
+                color = ['#ffc502', '#ffd902', '#f6f337', '#f5f37d']
+            if c == 4:
+                cc = 3
+                ltitle = 'OP3 Machines'
+                color = ['#ffc502', '#ffd902', '#f6f337', '#f5f37d']
+ 
+    
+    if sort == 'Dim':
+        sort = 'Dimensional_Inspection'
+        pass
+    if sort == 'Perf':
+        sort = 'Performance_Inspection'
+        pass
+    
+    #---------------------------------------------
+    # Legend Build
+
+    ma = []
+    lmach = []
+    Lmach = []
+    j = 0
+    for index,row in data.iterrows():
+        m = row['OP{} Machine'.format(cc)]
+        if m not in ma:
+            C = color[j]
+            ma.append(m)
+            lmach.append((m,C))
+            
+            b = mp.Patch(color = C, label = m)
+            Lmach.append(b)
+            j = j + 1
+    legdf = pd.DataFrame(lmach, columns = ['OP{} Machine'.format(cc), 'Color'])
+
+    data = pd.merge(data, legdf, how = 'inner', on = 'OP{} Machine'.format(cc))
+       
+    
+    #---------------------------------------------
+    
+    lim = set_lim(c,pn)
+    
+    width = 12
+    if len(data) > 50:
+        width = 20
+    if len(data) > 75:
+        width = 24
+    if len(data) > 100:
+        width = 38
+    if len(data) > 150:
+        width = 55        
+        
+    fig, ax = plt.subplots(figsize = (width,10))
+    
+    ax.plot(data['Serial Number'],data['Row {} Performance'.format(c)],'o-')
+    for index, row in data.iterrows():
+        ax.plot(row['Serial Number'], row['Row {} Performance'.format(c)], '-o', color = row['Color'])
+    
+    ax.set_facecolor('#ffffe4')
+    ax.set_ylim(lim[3],lim[4])    
+    plt.axhline(y = lim[0], color = 'red', linestyle = '--')
+    plt.axhline(y = lim[1], color = 'red', linestyle = '--')
+    plt.axhline(y = lim[2], color = 'green', linestyle = '-')
+    plt.title('{} Circuit {} Performance {}'.format(pn,c,DT))
+    plt.xlabel('Serial Numbers')
+    plt.gcf().autofmt_xdate()
+    plt.ylabel('C{}'.format(c))
+    plt.legend(handles = Lmach, title = ltitle)
+    plt.grid(True)
+    plt.show()
+    if not os.path.exists(plot_path):
+        os.makedirs(plot_path)
+    fig.savefig(plot_path + '\\C{}_Performance_{}_Order.png'.format(c,sort))
+    
+    
+#%%% UDF: by_proc_date
+def by_proc_date(data, pn, sort):
+    """
+    
+
+    Parameters
+    ----------
+    data : Pandas DataFrame Object
+        DESCRIPTION.
+    pn : str
+        DESCRIPTION.
+    sort : str
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """   
+    if pn == 'PN1':
+        if sort == 'Dim':
+            sort = 'Inspection Date'
+            for i in range(0,len(data)):
+                
+                dt1 = get_ts(data.iloc[i][2])
+                data.iloc[i][2] = int(dt1)
+            
+        if sort == 'Perf':
+            sort = 'Performance Inspection Date'
+            for i in range(0,len(data)):
+                
+                dt1 = get_ts(data.iloc[i][2])
+                data.iloc[i][2] = int(dt1)
+    
+    
+    
+        if sort == 'OP1' or sort == 'OP2' or sort == 'OP3':
+            for i in range(0,len(data)):
+                
+                dt1 = get_ts(data.iloc[i][2])
+                data.iloc[i][2] = int(dt1)
+                
+                dt2 = get_ts(data.iloc[i][4])
+                data.iloc[i][4] = int(dt2)
+                
+                dt3 = get_ts(data.iloc[i][6])
+                data.iloc[i][6] = int(dt3)
+        
+            data = data.sort_values(by = ['{} Machine'.format(sort)])#,'{} Process Date'.format(sort)])
+            
+            for j in range(0,len(data)):
+                ts1 = data.iloc[j][2]
+                ts2 = data.iloc[j][4]
+                ts3 = data.iloc[j][6]
+                
+                DT1 = datetime.fromtimestamp(ts1)
+                DT2 = datetime.fromtimestamp(ts2)
+                DT3 = datetime.fromtimestamp(ts3)
+                
+                data.iloc[j][2] = DT1
+                data.iloc[j][4] = DT2
+                data.iloc[j][6] = DT3
+        
+        
+            
+    if pn == 'PN2':
+        if sort == 'Dim':
+            sort = 'Inspection Date'
+            for i in range(0,len(data)):
+                
+                dt1 = get_ts(data.iloc[i][2])
+                data.iloc[i][2] = int(dt1)
+            
+        if sort == 'Perf':
+            sort = 'Performance Inspection Date'
+            for i in range(0,len(data)):
+                
+                dt1 = get_ts(data.iloc[i][2])
+                data.iloc[i][2] = int(dt1)
+    
+    
+    
+        if sort == 'OP1'  or sort == 'OP3':
+            for i in range(0,len(data)):
+                
+                dt1 = get_ts(data.iloc[i][2])
+                data.iloc[i][2] = int(dt1)
+                
+                
+                dt3 = get_ts(data.iloc[i][4])
+                data.iloc[i][4] = int(dt3)
+                
+            data = data.sort_values(by = ['{} Machine'.format(sort),'{} Process Date'.format(sort)])
+            
+            for j in range(0,len(data)):
+                ts1 = data.iloc[j][2]
+                ts3 = data.iloc[j][4]
+                
+                DT1 = datetime.fromtimestamp(ts1)
+                DT3 = datetime.fromtimestamp(ts3)
+                
+                data.iloc[j][2] = DT1
+                data.iloc[j][4] = DT3
+    return(data)
+#%%% UDF: count_oot
+def count_oot(r, opt = 1):
+    """
+    Counts out of tolerance instances in a DataFrame.
+
+    Parameters
+    ----------
+    r : DataFrame
+        opt = 1: DataFrame with column format: | Serial Number | OOT Dimension | Row | Hole | Measured | Lower Bound | Upper Bound |.
+        opt = 2: Raw DataFrame format.
+
+    opt : int
+        User designates formatting of dataframe. 
+
+    Returns
+    -------
+    Out of tolerance sums for feature position, angle 1, angle 2, angle 3, area ratio, and diameter.
+
+    """
+
+    if opt == 1:
+        foot = r[r['OOT Dimension'] == 'Feature Position'].count()['OOT Dimension']
+        a1oot = r[r['OOT Dimension'] == 'Angle 1'].count()['OOT Dimension']
+        a2oot = r[r['OOT Dimension'] == 'Angle 2'].count()['OOT Dimension']
+        a3oot = r[r['OOT Dimension'] == 'Angle 3'].count()['OOT Dimension']
+        aroot = r[r['OOT Dimension'] == 'Area Ratio'].count()['OOT Dimension']
+        doot = r[r['OOT Dimension'] == 'Diameter'].count()['OOT Dimension']
+    
+    if opt == 2:
+        foot = len(r[r['Feature Position Out of Tolerance'] != 0])
+        a1oot = len(r[r['Angle 1 Position Out of Tolerance'] != 0])
+        a2oot = len(r[r['Angle 1 Position Out of Tolerance'] != 0])
+        a3oot = len(r[r['Angle 3 Position Out of Tolerance'] != 0])
+        aroot = len(r[r['Area Ratio Position Out of Tolerance'] != 0])
+        doot = len(r[r['Diameter Out of Tolerance'] != 0])
+    
+    
+    return(foot, a1oot, a2oot, a3oot, aroot, doot)
+
+#%%% UDF: get_dims
+def dim_analysis(df):
+    """
+    Takes in a raw DataFrame and returns out of tolerance counts and precise
+    report.
+
+    Parameters
+    ----------
+    sn : str
+        Serial Number of corresponding dataframe.
+    df : DataFrame
+        DataFrame containing raw dimensional inspection report.
+    
+
+    Returns
+    -------
+    None.
+
+    """
+    
+    
+    # Pull Out of Tollerance Dimensions
+    for i,r in df.iterrows():
+
+        sn = r['Serial Number']
+        f = r['Feature Position Measured']
+        a1 = r['Angle 1 Measured']
+        a2 = r['Angle 2 Measured']
+        a3 = r['Angle 3 Measured']
+        ar = r['Area Ratio Measured']
+        d = r['Diameter Measured']
+        
+        if r['Feature Position Out of Tolerance'] != 0:
+            o.append((sn,'Feature Position',r['Row'],r['Hole'], f, 0, 0.01))
+            
+        if r['Angle 1 Out of Tolerance'] != 0:
+            o.append((sn,'Angle 1',r['Row'],r['Hole'], a1, r['Angle 1 Lower Bound'], r['Angle 1 Upper Bound']))
+            
+        if r['Angle 2 Out of Tolerance'] != 0:
+            o.append((sn,'Angle 2',r['Row'],r['Hole'], a2, r['Angle 2 Lower Bound'], r['Angle 2 Upper Bound']))
+            
+        if r['Angle 3 Out of Tolerance'] != 0:
+            o.append((sn,'Angle 3',r['Row'],r['Hole'], a3, r['Angle 3 Lower Bound'], r['Angle 3 Upper Bound']))
+            
+        if r['Area Ratio Out of Tolerance'] != 0:
+            o.append((sn,'Area Ratio',r['Row'],r['Hole'], ar, r['Area Ratio Lower Bound'], r['Area Ratio Upper Bound']))
+            
+        if r['Diameter Out of Tolerance'] != 0:
+            o.append((sn,'Diameter',r['Row'],r['Hole'], d, r['Diameter Lower Bound'], r['Diameter Upper Bound']))
+            
+    oot = pd.DataFrame(o, columns = ['Serial Number', 'OOT Dimension', 'Row', 'Hole', 'Measured', 'Lower Bound', 'Upper Bound'])
+    
+
+    return(oot)
+
+#%%% UDF: norm
+def norm(data, feature):
+    
+    if feature == 'Feature Position':
+        m = '{} Measured'.format(feature)
+        norm = []
+        for index, row in data.iterrows():
+            v = row[m]
+            ll = 0
+            ul = 0.1
+            
+            V = ((v-ll)/ul-ll)
+            norm.append(V)
+              
+    else:
+        m = '{} Measured'.format(feature)
+        LL = '{} Lower Bound'.format(feature)
+        UL = '{} Upper Bound'.format(feature)
+    
+        norm = []
+        for index, row in data.iterrows():
+            v = row[m]
+            ll = row[LL]
+            ul = row[UL]
+
+            V = ((v-ll)/(ul-ll))
+            
+            norm.append(V)
+            
+    return norm
+
+#%%% UDF: boxplot
+def boxplot(bp1, bp2, bp3, bp4, feature, pn, path):
+    
+    data = [bp1, bp2, bp3, bp4]
+
+    fig = plt.figure()
+    
+    ax = fig.add_axes([0, 0, 1, 1])
+    
+    if feature != 'Feature Position':
+        plt.axhline(y = 1, color = 'red', linestyle = '--')
+        plt.axhline(y = 0.5, color = 'green', linestyle = '-')
+        plt.axhline(y = 0, color = 'red', linestyle = '--')
+    else:
+        plt.axhline(y = 1, color = 'red', linestyle = '--')
+        plt.axhline(y = 0, color = 'green', linestyle = '-')
+    
+    ax.boxplot(data)
+    ax.set_facecolor('#ffffe4')
+    ax.axis('on')
+    ax.axis('tight')
+    
+    plt.title('{} Boxplot'.format(feature))
+    plt.xlabel('Row')
+    plt.ylabel('Normalized {} Data'.format(feature))
+    
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    
+    if not os.path.exists(path):
+        os.makedirs(path)
+        
+    fig.savefig(path + '\\{}_{}_Boxplot.png'.format(pn, feature))
+    
+
+#%%
+def box(data, feature, pn, path):
+    R1 = data[data['Row'] == 1]
+    R1 = norm(R1, feature = feature)
+    
+    R2 = data[data['Row'] == 2]
+    R2 = norm(R2, feature = feature)
+    
+    R3 = data[data['Row'] == 3]
+    R3 = norm(R3, feature = feature)
+    
+    R4 = data[data['Row'] == 4]
+    R4 = norm(R4, feature = feature)
+
+    boxplot(R1, R2, R3, R4, feature = feature, pn = pn, path = path)
+    
+    R1 = pd.DataFrame({'Row 1 {} Normalized'.format(feature) : R1})
+    R2 = pd.DataFrame({'Row 2 {} Normalized'.format(feature) : R2})
+    R3 = pd.DataFrame({'Row 3 {} Normalized'.format(feature) : R3})
+    R4 = pd.DataFrame({'Row 4 {} Normalized'.format(feature) : R4})
+
+    return(R1,R2,R3,R4)
+
+#%% Check Refresh Query File
+
+ti_m = os.path.getmtime(querypath) #Last file modification timestamp
+now = time.time() #Timestamp for now
+ago = now - ti_m #Length of time since last query refresh
+unit = 'sec'
+
+if ago > 60 and ago < 3600:
+    ago = ago/60
+    unit = 'mins.'
+if ago > 3600 and ago < 86400:
+    ago = ago/3600
+    unit = 'hrs.'
+if ago > 86400:
+    ago = ago/86400
+    unit = 'days'
+
+ago = str(ago)[:-10]
+yesno = '\nThe Performance Database was last updated {} {} ago.\nWould you like to refresh the database?:'.format(ago,unit)
+
+
+#%% GUI
+global Start, End, stage, pn, sort, path
+global machA, machB, machC, machD, machE, machF, machG,machH, machI
+
+today = datetime.today().strftime('%m/%d/%Y')
+t = dt.datetime.now()
+tsec = t.timestamp()
+tsec = int(tsec)
+start = tsec - 604800 # 7 days ago
+start = dt.datetime.fromtimestamp(start).strftime('%m/%d/%Y')
+
+window = tk.Tk()
+window.title = ('User Inputs')
+window['padx'] = 5
+window['pady'] = 5
+message = tkinter.font.Font(family = "Calibri", size = 5, weight = "normal")
+
+stk = tk.E + tk.W + tk.N + tk.S
+
+#%%% 0. App Selection Frame - For computers that dont have Excel
+
+def excel():
+    global app
+    app = "Excel"
+
+def openoffice():
+    global app
+    app = "OpenOffice"
+    
+appframe = ttk.LabelFrame(window,text = "0. Select which Application to open and read CSV files",relief = tk.RIDGE)
+appframe.grid(row = 1, column = 1, sticky = tk.E + tk.W + tk.N + tk.S)
+app = tk.StringVar()
+
+ex = ttk.Radiobutton(appframe,text = "Excel", variable = app, value = "Excel")
+oo = ttk.Radiobutton(appframe,text = "OpenOffice Calc", variable = app, value = "OpenOffice")
+
+ex.grid(row = 2, column = 1, sticky = tk.W)
+oo.grid(row = 3, column = 1, sticky = tk.W)
+
+
+#%%% 1. Part Number Selection
+#___________________________________
+
+def daterange_selected():
+    global pn, qtype, Start, End
+    
+    qtype = 'date'
+    entry_frame = ttk.LabelFrame(window,text = "1.5 Date Range Entry",relief = tk.RIDGE)
+    entry_frame.grid(row = 2, column = 2, sticky = tk.E + tk.W + tk.N + tk.S)
+    
+    startlabel = ttk.Label(entry_frame, text = "Start Date")
+    startlabel.grid(row = 1, column = 1, sticky = tk.W + tk.N) 
+    Start = ttk.Entry(entry_frame, width = 30)
+    Start.grid(row = 1, column = 2, sticky = tk.W, pady = 3)
+    Start.insert(tk.END,start)
+    
+    endlabel = ttk.Label(entry_frame, text = "End Date")
+    endlabel.grid(row = 2, column = 1, sticky = tk.W + tk.N) 
+    End = ttk.Entry(entry_frame, width = 30)
+    End.grid(row = 2, column = 2, sticky = tk.W, pady = 3)
+    End.insert(tk.END,today)
+    
+    dateformat = ttk.Label(entry_frame,text = "Enter in MM/DD/YYYY format.")
+    dateformat.grid(row = 4,column = 1, columnspan = 2, sticky = tk.W, pady = 2)
+    dateformat.configure(font = message)
+
+
+def list_selected():
+    global qtype, workbook, excel, path, oDocument
+    
+    
+    qtype = 'list'
+    path = r'C:\Users\arpet\OneDrive\Desktop\Cooling_Hole_Simulation\00_Reports\Custom_SN_List.csv'
+    entry_frame = ttk.LabelFrame(window,text = "1.5 Enter List in CSV File",relief = tk.RIDGE)
+    entry_frame.grid(row = 3, column = 2, sticky = tk.E + tk.W + tk.N + tk.S)
+    
+   # if app == "OpenOffice":
+        #Connect to OpenOffice
+        #localContext = uno.getDesktop()
+        #oDesktop = localContext.getByName("Desktop") 
+        #oDocument = oDesktop.loadComponent("org.openoffice.Office.Spreadsheet", "", 0, path) 
+    
+    if app == "Excel":
+        
+        excel = win32com.Dispatch("Excel.Application")
+        excel.visible = True
+        workbook = excel.Workbook.open(path)
+        
+typeframe = ttk.LabelFrame(window,text = "1. Data Pull by Date Range or Custom List",relief = tk.RIDGE)
+typeframe.grid(row = 2, column = 1, sticky = tk.E + tk.W + tk.N + tk.S)
+
+qtype = tk.StringVar()
+
+dt = ttk.Radiobutton(typeframe, text = "by Date Range", variable = qtype, value = 'date', command = daterange_selected)
+lt = ttk.Radiobutton(typeframe, text = "by User Defined List", variable = qtype, value = 'list', command = list_selected)
+
+dt.grid(row = 4, column = 2, sticky=tk.W)
+lt.grid(row = 5, column = 2, sticky=tk.W)
+
+
+#%%% 2. Part Number Selection
+
+pnframe = ttk.LabelFrame(window, text = '2. Select Part Type', relief = tk.RIDGE, padding = 6)
+pnframe.grid(row = 3, column = 1, sticky = stk)
+
+pn = tk.StringVar()
+
+P1 = ttk.Radiobutton(pnframe, text = "Part Type 1", variable = pn, value = 'PN1')
+P2 = ttk.Radiobutton(pnframe, text = "Part Type 2", variable = pn, value = 'PN2')
+
+P1.grid(row = 4, column = 2, sticky=tk.W)
+P2.grid(row = 5, column = 2, sticky=tk.W)
+
+
+#%%% 3. Process Order Selection
+
+procframe = ttk.LabelFrame(window, text = '3. Select Process Order', relief = tk.RIDGE, padding = 6)
+procframe.grid(row = 4, column = 1, sticky = stk)
+sort = tk.StringVar()
+
+proc1 = ttk.Radiobutton(procframe, text = "Machine Operation 1 Process Order", variable = sort, value = 'OP1')
+proc2 = ttk.Radiobutton(procframe, text = "Machine Operation 2 Process Order", variable = sort, value = 'OP2')
+proc3 = ttk.Radiobutton(procframe, text = "Machine Operation 3 Process Order", variable = sort, value = 'OP3')
+dim = ttk.Radiobutton(procframe, text = "Dimensional Inspection Process Order", variable = sort, value = 'Dim')
+perf = ttk.Radiobutton(procframe, text = "Performance Inspection Process Order", variable = sort, value = 'Perf')
+
+proc1.grid(row = 4, column = 2, sticky=tk.W)
+proc2.grid(row = 5, column = 2, sticky=tk.W)
+proc3.grid(row = 6, column = 2, sticky=tk.W)
+dim.grid(row = 7, column = 2, sticky=tk.W)
+perf.grid(row = 9, column = 2, sticky=tk.W)
+
+
+
+#%%% 4. Name Data Folder
+
+nameframe = ttk.LabelFrame(window,text = "4. Name the report folder",relief = tk.RIDGE)
+nameframe.grid(row = 5, column = 1, sticky = tk.E + tk.W + tk.N + tk.S)
+
+fld = ttk.Label(nameframe, text = "Folder Name")
+fld.grid(row = 1, column = 1, sticky = tk.W + tk.N) 
+Fld = ttk.Entry(nameframe, width = 30)
+Fld.grid(row = 2, column = 1, sticky = tk.W, pady = 3)
+Fld.insert(tk.END, 'Week ##')
+
+Fldformat = ttk.Label(nameframe, text = 'Folder Location: {}'.format(datasave))
+Fldformat.grid(row = 4, column = 1, sticky = tk.E + tk.W + tk.N + tk.S, pady = 2)
+
+
+#%%% 5. Database Refresh
+
+refresh = tk.StringVar()
+
+qframe = ttk.LabelFrame(window, text = "5. Would you like to refresh the Performance Database?")
+qframe.grid(row = 6, column = 1, sticky = tk.E + tk.W + tk.N + tk.S, pady = 2)
+
+ref = ttk.Checkbutton(qframe, text = "Refresh Performance Database", variable = refresh)
+ref.grid(row = 2, column = 2, sticky=tk.W)
+
+#%%% OK Button
+def stop():
+    global window, path, oDocument
+    try:
+        workbook.Save()
+        workbook.Close()
+        excel.Quit()
+    except:
+        pass
+    
+    #try:
+        # Save the sheet as CSV
+        # Replace with your desired save location
+        
+        #sheet = oDocument.getCurrentController().getActiveSheet()
+        #arguments = (
+        #    uno.createUnoStruct("com.sun.star.beans.PropertyValue"),
+        #    uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+        #)
+        #arguments[0].Name = "FilterName"
+        #arguments[0].Value = "Text - txt - csv (StarCalc)"
+        #arguments[1].Name = "FilterOptions"
+        #arguments[1].Value = "44,34,76,1,1"  # Default CSV options
+        
+        #sheet.storeToURL(path, arguments)
+    #except:
+     #   pass
+    
+    
+    window.quit()
+
+ok = ttk.Button(window, text = "Ok", command = stop)
+ok.grid(row = 9, column = 1)
+
+window.mainloop()
+
+#%%% Get User Input
+
+Start = Start.get()
+End = End.get()
+app = app.get()
+pn = pn.get()
+sort = sort.get()
+folder = Fld.get()
+refresh = refresh.get()
+
+window.destroy()
+
+Start = '10/14/2024'
+End = '10/19/2024'
+#%% Part Type 1
+DT = Start + ' - ' + End
+
+reportpath = datasave + folder 
+if not os.path.exists(reportpath):
+    os.makedirs(reportpath)
+    
+if pn == 'PN1':
+    
+    if sort == 'OP1' or sort == 'OP2' or sort == 'OP3':
+        output = Pt_List_by_Date(Start, End, pn, out = 'df', machs = machs)
+        
+        byop = output.sort_values(by='{} Process Date'.format(sort))
+        AF = [] 
+        for index,row in byop.iterrows():
+            
+            SN = row['Serial Number']
+           
+            op1 = datetime.fromtimestamp(row['OP1 Process Date'])
+            op2 = datetime.fromtimestamp(row['OP2 Process Date'])
+            op3 = datetime.fromtimestamp(row['OP3 Process Date'])
+            
+            af = performance_data_pull(SN, path = querypath)
+            
+            p1 = 'FAIL'
+            p2 = 'FAIL'
+            p3 = 'FAIL'
+            p4 = 'FAIL'
+                        
+            c1 = set_lim('C1',pn)
+            c2 = set_lim('C2',pn)
+            c3 = set_lim('C3',pn)
+            c4 = set_lim('C4',pn)
+            
+            if af[0] >= c1[0] and af[0] <= c1[1]:
+                p1 = 'PASS'
+            if af[1] >= c2[0] and af[1] <= c2[1]:
+                p2 = 'PASS'
+            if af[2] >= c3[0] and af[2] <= c3[1]:
+                p3 = 'PASS'
+            if af[3] >= c4[0] and af[3] <= c4[1]:
+                p4 = 'PASS'
+            
+            
+            AF.append((row['Serial Number'], row['OP1 Machine'], op1, row['OP2 Machine'], op2, row['OP3 Machine'], op3, af[0], p1, af[1], p2, af[2], p3, af[3], p4))
+
+
+    AF = pd.DataFrame(AF, columns = ['Serial Number', 'OP1 Machine', 'OP1 Process Date', 'OP2 Machine', 
+                                     'OP2 Process Date', 'OP3 Machine', 'OP3 Process Date',
+                                     'Row 1 Performance','Row 1 P/F', 'Row 2 Performance','Row 2 P/F',
+                                     'Row 3 Performance','Row 3 P/F', 'Row 4 Performance', 'Row 4 P/F'])
+
+
+    AF1 = AF.sort_values(by = ['OP1 Machine','OP1 Process Date']) 
+    AF2 = AF.sort_values(by = ['OP2 Machine','OP2 Process Date']) 
+    AF3 = AF.sort_values(by = ['OP3 Machine','OP3 Process Date']) 
+    AF4 = AF.sort_values(by = ['OP3 Machine','OP3 Process Date']) 
+
+    chart(AF1, pn, reportpath, 1, sort, DT = DT)
+    chart(AF2, pn, reportpath, 2, sort, DT = DT)
+    chart(AF3, pn, reportpath, 3, sort, DT = DT)
+    chart(AF4, pn, reportpath, 4, sort, DT = DT)
+
+    if sort == 'OP1':
+        Sort = AF1
+    if sort == 'OP2':
+        Sort = AF2
+    if sort == 'OP3':
+        Sort = AF3
+
+#%% Dimensional
+
+    fill = pd.DataFrame()  
+    o = []
+    total = []
+    R = []
+
+
+    for index, row in Sort.iterrows():
+      sn = row['Serial Number']
+      
+      
+      #readpath = r'\Dimensional_Data\{}\{}_raw_inspection_data.csv'.format(sn,sn)
+      df = pd.read_csv(readpath)
+      fill = pd.concat([fill,df])
+
+      oot = dim_analysis(df)
+      
+    for i in range(0,len(Sort)):
+        sn = Sort.iloc[i,0]
+        OOT = oot[oot['Serial Number'] == sn]
+        
+        f, a1, a2, a3, ar, d = count_oot(OOT)
+        t = f + a1 + a2 + a3 + ar + d
+        if t < 27:
+            t = 'PASS'
+        else:
+            t = 'FAIL'
+        total.append((sn, f, a1, a2, a3, ar, d, t))
+   
+        # Organize by Row
+        r1 = OOT[OOT['Row'] == 1]
+        f, a1, a2, a3, ar, d = count_oot(r1)
+        R.append((sn,1, f, a1, a2, a3, ar, d))
+
+      
+        r2 = OOT[OOT['Row'] == 2]
+        f, a1, a2, a3, ar, d = count_oot(r2)
+        R.append((sn,2,f, a1, a2, a3, ar, d))
+        
+      
+        r3 = OOT[OOT['Row'] == 3]
+        f, a1, a2, a3, ar, d = count_oot(r3)
+        R.append((sn,3,f, a1, a2, a3, ar, d))
+        
+      
+        r4 = OOT[OOT['Row'] == 4]
+        f, a1, a2, a3, ar, d = count_oot(r4)
+        R.append((sn,4,f, a1, a2, a3, ar, d))
+            
+
+#%% Tables and Plots
+
+
+    total = pd.DataFrame(total, columns = ['Serial Number','Feature Position Out of Tolerance',
+                               'Angle 1 Out of Tolerance', 'Angle 2 Out of Tolerance',
+                               'Angle 3 Out of Tolerance', 'Area Ratio Out of Tolerance', 'Diameter Out of Tolerance', 'Overall Dimensional Passing'])
+    R = pd.DataFrame(R, columns = ['Serial Number', 'Row','Feature Position Out of Tolerance',
+                                   'Angle 1 Out of Tolerance', 'Angle 2 Out of Tolerance',
+                                   'Angle 3 Out of Tolerance', 'Area Ratio Out of Tolerance', 'Diameter Out of Tolerance'])
+    Row = []
+    
+    R1 = R[R['Row'] == 1]
+    F1 = R1['Feature Position Out of Tolerance'].sum() 
+    A1 = R1['Angle 1 Out of Tolerance'].sum()
+    A2 = R1['Angle 2 Out of Tolerance'].sum()
+    A3 = R1['Angle 3 Out of Tolerance'].sum()
+    AR = R1['Area Ratio Out of Tolerance'].sum()
+    D = R1['Diameter Out of Tolerance'].sum()
+    Row.append(('Row 1',F1, A1, A2, A3, AR, D))
+    
+    R2 = R[R['Row'] == 2]
+    F1 = R2['Feature Position Out of Tolerance'].sum() 
+    A1 = R2['Angle 1 Out of Tolerance'].sum()
+    A2 = R2['Angle 2 Out of Tolerance'].sum()
+    A3 = R2['Angle 3 Out of Tolerance'].sum()
+    AR = R2['Area Ratio Out of Tolerance'].sum()
+    D = R2['Diameter Out of Tolerance'].sum()
+    Row.append(('Row 2', F1, A1, A2, A3, AR, D))
+    
+    R3 = R[R['Row'] == 3]
+    F1 = R3['Feature Position Out of Tolerance'].sum() 
+    A1 = R3['Angle 1 Out of Tolerance'].sum()
+    A2 = R3['Angle 2 Out of Tolerance'].sum()
+    A3 = R3['Angle 3 Out of Tolerance'].sum()
+    AR = R3['Area Ratio Out of Tolerance'].sum()
+    D = R3['Diameter Out of Tolerance'].sum()
+    Row.append(('Row 3', F1, A1, A2, A3, AR, D))
+    
+    R4 = R[R['Row'] == 4]
+    F1 = R4['Feature Position Out of Tolerance'].sum() 
+    A1 = R4['Angle 1 Out of Tolerance'].sum()
+    A2 = R4['Angle 2 Out of Tolerance'].sum()
+    A3 = R4['Angle 3 Out of Tolerance'].sum()
+    AR = R4['Area Ratio Out of Tolerance'].sum()
+    D = R4['Diameter Out of Tolerance'].sum()
+    Row.append(('Row 4', F1, A1, A2, A3, AR, D))
+    
+    Row = pd.DataFrame(Row, columns = ['Row', 'Feature Position Out of Tolerance', 
+                                       'Angle 1 Out of Tolerance', 'Angle 2 Out of Tolerance',
+                                       'Angle 3 Out of Tolerance', 'Area Ratio Out of Tolerance', 
+                                       'Diameter Out of Tolerance'])
+    
+    tot = total.drop(columns = ['Feature Position Out of Tolerance',
+                               'Angle 1 Out of Tolerance', 'Angle 2 Out of Tolerance',
+                               'Angle 3 Out of Tolerance', 'Area Ratio Out of Tolerance',
+                               'Diameter Out of Tolerance'])
+    
+    Sorted = pd.merge(Sort, tot, how = 'outer', on = 'Serial Number')
+#%% Tables and Plots continued
+
+    dimpass = len(Sorted[Sorted['Overall Passing'] == 'PASS'])
+    c1pass = len(Sorted[Sorted['Row 1 P/F'] == 'PASS'])
+    c2pass = len(Sorted[Sorted['Row 2 P/F'] == 'PASS'])
+    c3pass = len(Sorted[Sorted['Row 3 P/F'] == 'PASS'])
+    c4pass = len(Sorted[Sorted['Row 4 P/F'] == 'PASS'])
+    nofparts = len(Sorted)
+    
+    g = nofparts
+    for index, row in Sorted.iterrows():
+        i = 0
+        if row['Overall Passing'] == 'FAIL' and i == 0:
+            i = 1
+            g = g - 1
+        if row['Row 1 P/F'] == 'FAIL' and i == 0:
+            i = 1
+            g = g - 1
+        if row['Row 2 P/F'] == 'FAIL' and i == 0:
+            i = 1
+            g = g - 1
+        if row['Row 3 P/F'] == 'FAIL' and i == 0:
+            i = 1
+            g = g - 1
+        if row['Row 4 P/F'] == 'FAIL' and i == 0:
+            i = 1
+            g = g - 1
+    
+    fty = str((g/nofparts)*100) + '%'
+
+    
+    tot = (('Date Range:', '{} - {}'.format(Start,End)),
+           ('No. of parts fully processed:', nofparts),
+           ('No. of parts passing dimensional insp.:', dimpass),
+           ('No. of parts passing C1 performance:', c1pass),
+           ('No. of parts passing C2 performance:', c2pass),
+           ('No. of parts passing C3 performance:', c3pass),
+           ('No. of parts passing C4 performance:', c4pass),
+           ('Percent Passing First Time Yield:', fty)
+           )
+    tot = pd.DataFrame(tot)
+    fig, ax = plt.subplots()
+    fig.patch.set_visible(False)
+    ax.axis('off')
+    ax.axis('tight')
+    ax.table(cellText = tot.values, loc = 'center', colWidths = [0.4, 0.3])
+    plt.show()
+    if not os.path.exists(reportpath):
+        os.makedirs(reportpath)
+    fig.savefig(reportpath + '\\{}_Report_Totals.png'.format(pn))
+    
+
+    
+#%% Boxplots
+
+    F1, F2, F3, F4 = box(fill, feature = "Feature Position", pn = pn, path = reportpath)
+    A11, A12, A13, A14 = box(fill, feature = "Angle 1", pn = pn, path = reportpath)
+    A21, A22, A23, A24 = box(fill, feature = "Angle 2", pn = pn, path = reportpath)
+    A31, A32, A33, A34 = box(fill, feature = "Angle 3", pn = pn, path = reportpath)
+    AR1, AR2, AR3, AR4 = box(fill, feature = "Area Ratio", pn = pn, path = reportpath)
+    D1, D2, D3, D4 = box(fill, feature = "Diameter", pn = pn, path = reportpath)
+    
+#%% Part Type 2
+if pn == 'PN2':
+    
+    output = Pt_List_by_Date(Start, End, pn, out = 'df', machs = machs)
+    
+    byop = output.sort_values(by='{} Process Date'.format(sort))
+    AF = [] 
+    for index,row in byop.iterrows():
+        
+        SN = row['Serial Number']
+       
+        op1 = datetime.fromtimestamp(row['OP1 Process Date'])
+        op3 = datetime.fromtimestamp(row['OP3 Process Date'])
+        
+        af = performance_data_pull(SN, path = querypath)
+        
+        p1 = 'FAIL'
+        p2 = 'FAIL'
+        p3 = 'FAIL'
+        p4 = 'FAIL'
+                    
+        c1 = set_lim('C1',pn)
+        c2 = set_lim('C2',pn)
+        c3 = set_lim('C3',pn)
+        c4 = set_lim('C4',pn)
+        
+        if af[0] >= c1[0] and af[0] <= c1[1]:
+            p1 = 'PASS'
+        if af[1] >= c2[0] and af[1] <= c2[1]:
+            p2 = 'PASS'
+        if af[2] >= c3[0] and af[2] <= c3[1]:
+            p3 = 'PASS'
+        if af[3] >= c4[0] and af[3] <= c4[1]:
+            p4 = 'PASS'
+        
+        AF.append((row['Serial Number'], row['OP1 Machine'], op1, row['OP3 Machine'], op3, af[0], p1, af[1], p2, af[2], p3, af[3], p4))
+
+
+    AF = pd.DataFrame(AF, columns = ['Serial Number', 'OP1 Machine', 'OP1 Process Date', 'OP3 Machine', 'OP3 Process Date',
+                                     'Row 1 Performance','Row 1 P/F', 'Row 2 Performance','Row 2 P/F',
+                                     'Row 3 Performance','Row 3 P/F', 'Row 4 Performance', 'Row 4 P/F'])
+
+    AF1 = AF.sort_values(by = ['OP1 Machine','OP1 Process Date']) 
+    AF2 = AF.sort_values(by = ['OP1 Machine','OP1 Process Date']) 
+    AF3 = AF.sort_values(by = ['OP3 Machine','OP3 Process Date']) 
+    AF4 = AF.sort_values(by = ['OP3 Machine','OP3 Process Date']) 
+
+    chart(AF1, pn, reportpath, 1, sort, DT = DT)
+    chart(AF2, pn, reportpath, 2, sort, DT = DT)
+    chart(AF3, pn, reportpath, 3, sort, DT = DT)
+    chart(AF4, pn, reportpath, 4, sort, DT = DT)
+
+
+#%% Write Data to Report
+
+#with pd.ExcelWriter(datawriter) as writer:
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
